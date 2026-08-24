@@ -241,7 +241,7 @@ io.use((socket,next)=>{
 });
 io.on("connection",socket=>socket.join("user:"+socket.user.id));
 
-app.get("*",(req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
+app.get("/{*splat}",(req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
 
 (async()=>{
   await initDb();
