@@ -27,7 +27,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 app.set("trust proxy", 1);
-app.use(helmet({ crossOriginEmbedderPolicy: false }));
+app.use(helmet({ crossOriginEmbedderPolicy: false, contentSecurityPolicy: false }));
 app.use(express.json({limit:"6mb"}));
 app.use(rateLimit({windowMs:60*1000, max:120, standardHeaders:true, legacyHeaders:false}));
 app.use(express.static(path.join(__dirname,"public")));
