@@ -64,7 +64,7 @@
     ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
 
     /* Layout */
-    .app { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+    .app { display: flex; height: 100vh; height: 100dvh; width: 100vw; overflow: hidden; }
     
     /* Sidebar (Desktop) */
     .side {
@@ -223,7 +223,6 @@
       border: 1px solid var(--border);
     }
     .btn.ghost:hover { background: var(--surface-hover); border-color: var(--border-accent); }
-.btn.ghost.active { color: var(--accent); border-color: var(--border-accent); background: var(--accent-glow); box-shadow: 0 0 0 1px var(--border-accent) inset; }
     .btn.danger { background: rgba(248, 113, 113, 0.15); color: var(--red); border: 1px solid rgba(248, 113, 113, 0.3); }
     .btn.danger:hover { background: var(--red); color: #fff; }
 
@@ -439,21 +438,44 @@
 
     /* Responsive Adjustments */
     @media (max-width: 768px) {
+      html, body { width: 100%; min-height: 100%; overflow: hidden; }
       .side { display: none; }
       .mobile-nav { display: flex; }
-      .app { flex-direction: column; }
-      .page { padding: 16px; padding-bottom: 80px; }
-      .grid { grid-template-columns: 1fr; gap: 16px; }
+      .app { flex-direction: column; width: 100%; height: 100dvh; min-height: 100dvh; overflow: hidden; }
+      .main { min-height: 0; height: 100%; }
+      .head { height: 68px; min-height: 68px; padding: 0 16px; flex-shrink: 0; }
+      .head h1 { font-size: 20px; }
+      .page { min-height: 0; height: 100%; padding: 16px 12px 88px; overflow-x: hidden; overflow-y: auto; }
+      .grid { display: grid; grid-template-columns: 1fr; gap: 12px; height: auto; }
+      .grid > .card { min-width: 0; }
       .stats { grid-template-columns: 1fr 1fr; }
-      .toast { bottom: 80px; right: 16px; left: 16px; text-align: center; }
-      .head { padding: 0 16px; }
+      .toast { bottom: 78px; right: 12px; left: 12px; text-align: center; }
       .bubble { max-width: 85%; }
+      .mobile-nav { height: 72px; padding: 4px 6px calc(4px + env(safe-area-inset-bottom)); padding-bottom: max(4px, env(safe-area-inset-bottom)); }
+      .mobile-nav-btn { min-height: 60px; font-size: 10px; }
+      .mobile-nav-btn span { font-size: 21px; line-height: 1; }
+
+      /* Mobile chat is a real full-screen conversation, not a second column. */
       .mobile-chat-active .mobile-nav { display: none; }
-      .mobile-chat-active .page { padding-bottom: 16px; padding: 0; }
+      .mobile-chat-active .page { height: 100%; padding: 0; overflow: hidden; }
       .mobile-chat-active .page > .grid { display: block; height: 100%; }
       .mobile-chat-active .page > .grid > .card:first-child { display: none; }
-      .mobile-chat-active .chat-container { height: 100%; min-height: calc(100vh - 70px); border-radius: 0; border: 0; }
-      .mobile-chat-active .composer { padding: 10px 0 0; }
+      .mobile-chat-active .chat-container {
+        display: flex;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        border: 0;
+        border-radius: 0;
+        padding: 0;
+        background: var(--bg);
+      }
+      .mobile-chat-active .chat-header { min-height: 64px; padding: 10px 14px; flex-shrink: 0; background: var(--surface); }
+      .mobile-chat-active .chat-header #backToChats { display: inline-flex !important; }
+      .mobile-chat-active .messages { min-height: 0; padding: 14px 12px; overscroll-behavior: contain; }
+      .mobile-chat-active .composer { flex-shrink: 0; padding: 10px 12px max(10px, env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--border); }
+      .mobile-chat-active .composer .input { min-width: 0; }
+      .mobile-chat-active .composer .btn { flex-shrink: 0; padding-inline: 13px; }
     }
   </style>
 </head>
@@ -566,17 +588,16 @@
     let theme = localStorage.getItem("wingooTheme") || "golden";
     let tempAvatarBase64 = null;
 
-    // User-facing pigeon choices mapped to IDs already accepted by server.js.
     const pigeons = {
       classic: "🤍 White",
-      spark: "🩷 Pink",
-      night: "🖤 Black"
+      pink: "🩷 Pink",
+      black: "🖤 Black"
     };
 
     const pigeonIcons = {
-      classic: "🤍",
-      spark: "🩷",
-      night: "🖤"
+      classic: "🕊️",
+      pink: "🩷",
+      black: "🖤"
     };
 
     const $ = s => document.querySelector(s);
@@ -681,7 +702,7 @@
     }
 
     // Navigation Router
-    async function loadPage(page) {
+    async function loadPage(page, options = {}) {
       document.body.classList.remove("mobile-chat-active");
       document.querySelectorAll(".nav, .mobile-nav-btn").forEach(x => {
         x.classList.toggle("active", x.dataset.page === page);
@@ -694,7 +715,7 @@
       $("#subTitle").textContent = subtitles[page] || "NETWORK";
 
       if (page === "network") network();
-      if (page === "chats") chats();
+      if (page === "chats") chats(Boolean(options.openCurrent));
       if (page === "friends") friendsPage();
       if (page === "profile") profile();
     }
@@ -735,7 +756,7 @@
       $("#loc").onclick = shareLocation;
       document.querySelectorAll("[data-user]").forEach(x => x.onclick = () => {
         current = friends.find(a => a.username === x.dataset.user);
-        loadPage("chats");
+        loadPage("chats", { openCurrent: true });
       });
     }
 
@@ -869,7 +890,7 @@
 
         document.querySelectorAll("[data-chat]").forEach(b => b.onclick = () => {
           current = friends.find(x => x.username === b.dataset.chat);
-          loadPage("chats");
+          loadPage("chats", { openCurrent: true });
         });
       };
 
@@ -877,9 +898,9 @@
     }
 
     // CHATS & MESSAGING VIEW
-    async function chats() {
+    async function chats(openCurrent = false) {
       await refreshFriends();
-      if (!current && friends.length > 0) current = friends[0];
+      if (!current && friends.length > 0 && (window.innerWidth > 768 || openCurrent)) current = friends[0];
 
       $("#page").innerHTML = `
         <div class="grid">
@@ -904,10 +925,10 @@
 
       document.querySelectorAll("[data-open]").forEach(x => x.onclick = () => {
         current = friends.find(f => f.username === x.dataset.open);
-        chats();
+        chats(true);
       });
 
-      if (current) loadChat(current.username);
+      if (current && (window.innerWidth > 768 || openCurrent)) loadChat(current.username);
     }
 
     async function loadChat(username) {
@@ -1017,12 +1038,12 @@
                 <div class="metric-lbl">Friends</div>
               </div>
               <div class="metric">
-                <div class="metric-val">${pigeonIcons[pigeon] || "🤍"}</div>
-                <div class="metric-lbl">Signature Pigeon</div>
+                <div class="metric-val">🕊️ 247</div>
+                <div class="metric-lbl">Pigeons Sent</div>
               </div>
               <div class="metric">
-                <div class="metric-val">—</div>
-                <div class="metric-lbl">Travel Stats</div>
+                <div class="metric-val">📍 842</div>
+                <div class="metric-lbl">km Travelled</div>
               </div>
             </div>
           </div>
@@ -1098,7 +1119,7 @@
           let d = await api("/api/me", { method: "PATCH", body: JSON.stringify(body) });
           me = d.user;
           renderAvatar($("#meAvatar"), me);
-          toast("🏰 Castle settings saved!");
+          toast("🏰 Castle updated successfully");
         } catch (e) { toast(e.message); }
       };
     }
@@ -1131,31 +1152,12 @@
       reader.readAsDataURL(file);
     };
     $("#cancelPhoto").onclick = () => $("#photoModal").classList.remove("show");
-    $("#savePhotoBtn").onclick = async () => {
-      if (!tempAvatarBase64) {
-        toast("Choose a photo first.");
-        return;
+    $("#savePhotoBtn").onclick = () => {
+      if (tempAvatarBase64 && $("#castleAvatar")) {
+        $("#castleAvatar").innerHTML = `<img src="${tempAvatarBase64}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
       }
-      const btn = $("#savePhotoBtn");
-      btn.disabled = true;
-      btn.textContent = "Saving…";
-      try {
-        const d = await api("/api/me", {
-          method: "PATCH",
-          body: JSON.stringify({ avatar: tempAvatarBase64 })
-        });
-        me = d.user;
-        renderAvatar($("#meAvatar"), me);
-        if ($("#castleAvatar")) renderAvatar($("#castleAvatar"), me);
-        $("#photoModal").classList.remove("show");
-        tempAvatarBase64 = null;
-        toast("📸 Profile photo updated!");
-      } catch (e) {
-        toast(e.message);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Save Photo";
-      }
+      $("#photoModal").classList.remove("show");
+      toast("Photo preview ready. Click 'Save Castle Settings' to persist.");
     };
 
     // LOGOUT MODAL HANDLERS
