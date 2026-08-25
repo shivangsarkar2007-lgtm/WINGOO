@@ -94,12 +94,33 @@ function distanceKm(a,b){
   const q=Math.sin(dLat/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLon/2)**2;
   return R*2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q));
 }
+async function areFriends(aId,bId){
+  const {rows}=await pool.query(
+    `SELECT 1 FROM friendships WHERE status='accepted' AND
+     ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1))`,
+    [aId,bId]
+  );
+  return rows.length>0;
+}
 async function userWithDistance(viewerId,u){
-  const {rows}=await pool.query("SELECT lat,lng FROM users WHERE id=$1",[viewerId]);
-  const v=rows[0];
   const out=publicUser(u,viewerId);
-  const d=distanceKm(v,u);
-  out.distance=d==null?null:Number(d.toFixed(1));
+  let showDistance=false;
+  if(u.id===viewerId){
+    showDistance=false; // distance-to-self isn't meaningful
+  }else if(u.location_visibility==="hidden"){
+    showDistance=false;
+  }else if(u.location_visibility==="friends"){
+    showDistance=await areFriends(viewerId,u.id);
+  }else{
+    showDistance=true; // "approximate" (default)
+  }
+  if(showDistance){
+    const {rows}=await pool.query("SELECT lat,lng FROM users WHERE id=$1",[viewerId]);
+    const d=distanceKm(rows[0],u);
+    out.distance=d==null?null:Number(d.toFixed(1));
+  }else{
+    out.distance=null;
+  }
   return out;
 }
 const validPigeons=new Set(["classic","royal","night","spark","snow","fire"]);
@@ -193,11 +214,16 @@ app.get("/api/friends",auth,async(req,res)=>{
 });
 
 app.get("/api/friend-requests",auth,async(req,res)=>{
-  const {rows}=await pool.query(`
-    SELECT u.username,u.display_name,u.avatar
-    FROM users u JOIN friendships f ON f.requester_id=u.id
-    WHERE f.addressee_id=$1 AND f.status='pending'`,[req.user.id]);
-  res.json({requests:rows});
+  try{
+    const {rows}=await pool.query(`
+      SELECT u.username,u.display_name,u.avatar
+      FROM users u JOIN friendships f ON f.requester_id=u.id
+      WHERE f.addressee_id=$1 AND f.status='pending'`,[req.user.id]);
+    res.json({requests:rows});
+  }catch(e){
+    console.error("GET /api/friend-requests failed for user",req.user.id,e);
+    res.status(500).json({error:"Could not load friend requests"});
+  }
 });
 
 app.post("/api/friends/accept",auth,async(req,res)=>{
@@ -241,7 +267,17 @@ io.use((socket,next)=>{
 });
 io.on("connection",socket=>socket.join("user:"+socket.user.id));
 
-app.get("/{*splat}",(req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
+app.get("/*splat",(req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
+
+// Any error that escapes a route handler lands here. Without this, Express's
+// default handler returns an HTML page, which breaks the frontend's api()
+// helper (it always expects JSON) and can surface as a silently-swallowed
+// error rather than a visible one.
+app.use((err,req,res,next)=>{
+  console.error("Unhandled error on",req.method,req.path,err);
+  if(res.headersSent)return next(err);
+  res.status(err.status||500).json({error:"Something went wrong. Please try again."});
+});
 
 (async()=>{
   await initDb();
