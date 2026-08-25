@@ -22,7 +22,116 @@ function connectSocket(){if(socket)socket.disconnect();socket=io({auth:{token}})
 async function loadPage(page){document.querySelectorAll(".nav").forEach(x=>x.classList.toggle("active",x.dataset.page===page));$("#title").textContent={network:"Pigeon Network",chats:"Chats",friends:"Friends",profile:"My Castle"}[page];if(page==="network")network();if(page==="chats")chats();if(page==="friends")friendsPage();if(page==="profile")profile()}
 async function network(){await refreshFriends();$("#page").innerHTML=`<div class="grid"><div class="card"><small style="color:var(--gold)">🕊️ LIVE NETWORK</small><h2>Every friend is a castle.</h2><p style="color:var(--muted);line-height:1.6">Real accounts and protected locations now power your network.</p><button class="btn" id="loc">📍 Share location</button></div><div class="map"><div class="node you">🏰<b>${esc(me.displayName)}</b><small>you</small></div>${friends.map((f,i)=>`<button class="node ${["r","a","n","as"][i%4]}" data-user="${esc(f.username)}">🏠<b>${esc(f.displayName)}</b><small>${f.distance==null?"distance hidden":"~"+f.distance+" km"}</small></button>`).join("")}</div></div><div class="stats"><div class="stat">🕊️<small>Friends</small><b>${friends.length}</b></div><div class="stat">📍<small>Location</small><b>${me.locationVisibility==="hidden"?"Hidden":"Private"}</b></div><div class="stat">💬<small>Realtime</small><b>ON</b></div><div class="stat">🔐<small>Exact coords</small><b>Private</b></div></div>`;$("#loc").onclick=shareLocation;document.querySelectorAll("[data-user]").forEach(x=>x.onclick=()=>{current=friends.find(a=>a.username===x.dataset.user);loadPage("chats")})}
 async function refreshFriends(){friends=(await api("/api/friends")).friends}
-async function friendsPage(){await refreshFriends();$("#page").innerHTML=`<div class="card"><h2>Find a friend</h2><div class="search"><input id="q" class="input" placeholder="@username"><button class="btn" id="search">Search</button></div><div id="results"></div></div><div class="card" style="margin-top:15px"><h2>Your circle</h2>${friends.map(f=>`<div class="row"><div class="avatar">${f.avatar||f.displayName[0]}</div><div><b>${esc(f.displayName)}</b><small style="display:block;color:var(--muted)">@${esc(f.username)} · ${f.distance==null?"location hidden":f.distance+" km"}</small></div><button class="btn ghost spacer" data-chat="${esc(f.username)}">Message</button></div>`).join("")||'<p style="color:var(--muted)">No accepted friends yet.</p>'}</div>`;$("#search").onclick=async()=>{try{let d=await api("/api/users/search?q="+encodeURIComponent($("#q").value));$("#results").innerHTML=d.users.map(u=>`<div class="row"><div class="avatar">${u.avatar||u.displayName[0]}</div><div><b>${esc(u.displayName)}</b><small style="display:block;color:var(--muted)">@${esc(u.username)} ${u.distance!=null?"· "+u.distance+" km":""}</small></div><button class="btn spacer" data-add="${esc(u.username)}">Add</button></div>`).join("")||"<p style='color:var(--muted)'>No user found.</p>";document.querySelectorAll("[data-add]").forEach(b=>b.onclick=async()=>{try{await api("/api/friends/request",{method:"POST",body:JSON.stringify({username:b.dataset.add})});b.textContent="Requested ✓";b.disabled=true}catch(e){toast(e.message)}})}catch(e){toast(e.message)}};document.querySelectorAll("[data-chat]").forEach(b=>b.onclick=()=>{current=friends.find(x=>x.username===b.dataset.chat);loadPage("chats")})}
+async function friendsPage(){
+  await refreshFriends();
+
+  let incoming=[];
+  try{
+    incoming=(await api("/api/friend-requests")).requests||[];
+  }catch(e){
+    console.error("Could not load incoming friend requests:",e);
+  }
+
+  const render=()=>{
+    $("#page").innerHTML=`
+      ${incoming.length?`<div class="card request-card"><h2>📨 Friend requests <span style="color:var(--gold)">(${incoming.length})</span></h2>
+        ${incoming.map(r=>`<div class="row">
+          <div class="avatar">${r.avatar||r.display_name[0]}</div>
+          <div><b>${esc(r.display_name)}</b><small style="display:block;color:var(--muted)">@${esc(r.username)}</small></div>
+          <div class="request-actions">
+            <button class="btn" data-accept="${esc(r.username)}">Accept</button>
+          </div>
+        </div>`).join("")}
+      </div>`:""}
+
+      <div class="card" style="margin-top:15px">
+        <h2>Find a friend</h2>
+        <div class="search">
+          <input id="q" class="input" placeholder="@username">
+          <button class="btn" id="search">Search</button>
+        </div>
+        <div id="results"></div>
+      </div>
+
+      <div class="card" style="margin-top:15px">
+        <h2>Your circle</h2>
+        ${friends.map(f=>`<div class="row">
+          <div class="avatar">${f.avatar||f.displayName[0]}</div>
+          <div>
+            <b>${esc(f.displayName)}</b>
+            <small style="display:block;color:var(--muted)">
+              @${esc(f.username)} · ${f.distance==null?"location hidden":f.distance+" km"}
+            </small>
+          </div>
+          <button class="btn ghost spacer" data-chat="${esc(f.username)}">Message</button>
+        </div>`).join("")||'<p style="color:var(--muted)">No accepted friends yet.</p>'}
+      </div>`;
+
+    document.querySelectorAll("[data-accept]").forEach(b=>b.onclick=async()=>{
+      b.disabled=true;
+      b.textContent="Accepting…";
+
+      try{
+        await api("/api/friends/accept",{
+          method:"POST",
+          body:JSON.stringify({username:b.dataset.accept})
+        });
+
+        toast("👥 Friend request accepted!");
+        await friendsPage();
+      }catch(e){
+        b.disabled=false;
+        b.textContent="Accept";
+        toast(e.message);
+      }
+    });
+
+    $("#search").onclick=async()=>{
+      try{
+        let d=await api("/api/users/search?q="+encodeURIComponent($("#q").value));
+
+        $("#results").innerHTML=d.users.map(u=>`<div class="row">
+          <div class="avatar">${u.avatar||u.displayName[0]}</div>
+          <div>
+            <b>${esc(u.displayName)}</b>
+            <small style="display:block;color:var(--muted)">
+              @${esc(u.username)} ${u.distance!=null?"· "+u.distance+" km":""}
+            </small>
+          </div>
+          <button class="btn spacer" data-add="${esc(u.username)}">Add</button>
+        </div>`).join("")||"<p style='color:var(--muted)'>No user found.</p>";
+
+        document.querySelectorAll("[data-add]").forEach(b=>b.onclick=async()=>{
+          try{
+            await api("/api/friends/request",{
+              method:"POST",
+              body:JSON.stringify({username:b.dataset.add})
+            });
+
+            b.textContent="Requested ✓";
+            b.disabled=true;
+          }catch(e){
+            if(e.message==="A request already exists."){
+              b.textContent="Requested ✓";
+              b.disabled=true;
+            }
+            toast(e.message);
+          }
+        });
+
+      }catch(e){
+        toast(e.message);
+      }
+    };
+
+    document.querySelectorAll("[data-chat]").forEach(b=>b.onclick=()=>{
+      current=friends.find(x=>x.username===b.dataset.chat);
+      loadPage("chats");
+    });
+  };
+
+  render();
+}await refreshFriends();$("#page").innerHTML=`<div class="card"><h2>Find a friend</h2><div class="search"><input id="q" class="input" placeholder="@username"><button class="btn" id="search">Search</button></div><div id="results"></div></div><div class="card" style="margin-top:15px"><h2>Your circle</h2>${friends.map(f=>`<div class="row"><div class="avatar">${f.avatar||f.displayName[0]}</div><div><b>${esc(f.displayName)}</b><small style="display:block;color:var(--muted)">@${esc(f.username)} · ${f.distance==null?"location hidden":f.distance+" km"}</small></div><button class="btn ghost spacer" data-chat="${esc(f.username)}">Message</button></div>`).join("")||'<p style="color:var(--muted)">No accepted friends yet.</p>'}</div>`;$("#search").onclick=async()=>{try{let d=await api("/api/users/search?q="+encodeURIComponent($("#q").value));$("#results").innerHTML=d.users.map(u=>`<div class="row"><div class="avatar">${u.avatar||u.displayName[0]}</div><div><b>${esc(u.displayName)}</b><small style="display:block;color:var(--muted)">@${esc(u.username)} ${u.distance!=null?"· "+u.distance+" km":""}</small></div><button class="btn spacer" data-add="${esc(u.username)}">Add</button></div>`).join("")||"<p style='color:var(--muted)'>No user found.</p>";document.querySelectorAll("[data-add]").forEach(b=>b.onclick=async()=>{try{await api("/api/friends/request",{method:"POST",body:JSON.stringify({username:b.dataset.add})});b.textContent="Requested ✓";b.disabled=true}catch(e){toast(e.message)}})}catch(e){toast(e.message)}};document.querySelectorAll("[data-chat]").forEach(b=>b.onclick=()=>{current=friends.find(x=>x.username===b.dataset.chat);loadPage("chats")})}
 async function chats(){await refreshFriends();if(!current)current=friends[0];$("#page").innerHTML=`<div class="grid"><div class="card">${friends.map(f=>`<div class="row" data-open="${f.username}"><div class="avatar">${f.avatar||f.displayName[0]}</div><div><b>${esc(f.displayName)}</b><small style="display:block;color:var(--muted)">@${esc(f.username)}</small></div></div>`).join("")||"<p style='color:var(--muted)'>Add a friend first.</p>"}</div><div class="card chat" id="chat"></div></div>`;document.querySelectorAll("[data-open]").forEach(x=>x.onclick=()=>{current=friends.find(f=>f.username===x.dataset.open);loadChat(current.username)});if(current)loadChat(current.username)}
 async function loadChat(username){current=friends.find(f=>f.username===username)||current;let d=await api("/api/messages/"+encodeURIComponent(username));$("#chat").innerHTML=`<div><b>${esc(current.displayName)}</b><small style="display:block;color:var(--green)">${current.distance==null?"location hidden":current.distance+" km away"}</small></div><div class="messages">${d.messages.map(m=>`<div class="bubble ${m.sender===me.username?"me":""}">${esc(m.body)}<small style="display:block;color:#999">${m.pigeon_id} · ${new Date(m.created_at+"Z").toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</small></div>`).join("")}</div><div class="composer"><input id="msg" class="input" placeholder="Write a message…"><button class="btn" id="send">Send ${pigeons[pigeon]}</button></div>`;$("#send").onclick=send;$("#msg").onkeydown=e=>{if(e.key==="Enter")send()}}
 async function send(){let x=$("#msg").value.trim();if(!x||!current)return;try{await api("/api/messages",{method:"POST",body:JSON.stringify({username:current.username,body:x,pigeonId:pigeon})});$("#msg").value="";showFlight(current);loadChat(current.username)}catch(e){toast(e.message)}}
