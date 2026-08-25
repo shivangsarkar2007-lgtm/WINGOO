@@ -972,12 +972,18 @@
         });
 
         // SEARCH USER HANDLER
-        $("#search").onclick = async () => {
+        const runSearch = async () => {
+          let query = $("#q").value.trim();
+          if (!query) { toast("Type a username to search."); return; }
+          let searchBtn = $("#search");
+          searchBtn.disabled = true;
+          $("#results").innerHTML = skeletonRows(2);
           try {
-            let query = $("#q").value.trim();
-            if(!query) return;
             let d = await api("/api/users/search?q=" + encodeURIComponent(query));
-            $("#results").innerHTML = d.users.map(u => `
+            let users = (d.users || []).filter(u => u.username !== me.username);
+            $("#results").innerHTML = users.map(u => {
+              let isFriend = friends.some(f => f.username === u.username);
+              return `
               <div class="row" style="background:var(--surface-card);">
                 <div class="avatar" id="sr-av-${esc(u.username)}"></div>
                 <div>
@@ -986,35 +992,48 @@
                     @${esc(u.username)} ${u.distance != null ? "· " + u.distance + " km" : ""}
                   </small>
                 </div>
-                <button class="btn spacer" data-add="${esc(u.username)}">Add</button>
+                ${isFriend
+                  ? `<button class="btn ghost spacer" disabled>Friends ✓</button>`
+                  : `<button class="btn spacer" data-add="${esc(u.username)}">Add</button>`}
               </div>
-            `).join("") || `
+            `;
+            }).join("") || `
               <div class="empty-state" style="padding:20px 12px;">
                 <div class="empty-icon">🔍</div>
                 <div class="empty-sub">No one found with that username.</div>
               </div>
             `;
 
-            d.users.forEach(u => renderAvatar($(`#sr-av-${u.username}`), u));
+            users.forEach(u => renderAvatar($(`#sr-av-${u.username}`), u));
 
             document.querySelectorAll("[data-add]").forEach(b => b.onclick = async () => {
+              b.disabled = true;
+              b.textContent = "Requesting…";
               try {
                 await api("/api/friends/request", {
                   method: "POST",
                   body: JSON.stringify({ username: b.dataset.add })
                 });
                 b.textContent = "Requested ✓";
-                b.disabled = true;
               } catch (e) {
                 if (e.message === "A request already exists.") {
                   b.textContent = "Requested ✓";
-                  b.disabled = true;
+                } else {
+                  b.disabled = false;
+                  b.textContent = "Add";
                 }
                 toast(e.message);
               }
             });
-          } catch (e) { toast(e.message); }
+          } catch (e) {
+            toast(e.message);
+            $("#results").innerHTML = "";
+          } finally {
+            searchBtn.disabled = false;
+          }
         };
+        $("#search").onclick = runSearch;
+        $("#q").onkeydown = e => { if (e.key === "Enter") runSearch(); };
 
         document.querySelectorAll("[data-chat]").forEach(b => b.onclick = () => {
           current = friends.find(x => x.username === b.dataset.chat);
