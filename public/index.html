@@ -284,6 +284,7 @@
     .row { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: var(--radius-md); transition: var(--transition); }
     .row:hover { background: var(--surface-hover); }
     .spacer { margin-left: auto; }
+    .unread-dot { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
 
     /* Request Cards Highlight */
     .request-card {
@@ -635,6 +636,7 @@
     let pigeon = localStorage.getItem("wingooPigeon") || "classic";
     let theme = localStorage.getItem("wingooTheme") || "golden";
     let tempAvatarBase64 = null;
+    let unread = new Set();
 
     const pigeons = {
       classic: "🤍 White",
@@ -784,8 +786,28 @@
       if (socket) socket.disconnect();
       socket = io({ auth: { token } });
       socket.on("message:new", m => {
-        toast("🕊️ New message from @" + m.sender);
-        if (current && current.username === m.sender) loadChat(current.username);
+        if (current && current.username === m.sender) {
+          loadChat(current.username, { refreshOnly: true });
+        } else {
+          toast("🕊️ New message from @" + m.sender);
+          unread.add(m.sender);
+          repaintUnread();
+        }
+      });
+    }
+
+    function repaintUnread() {
+      document.querySelectorAll("[data-open]").forEach(row => {
+        let uname = row.dataset.open;
+        let existing = row.querySelector(".unread-dot");
+        let shouldShow = unread.has(uname) && !(current && current.username === uname);
+        if (shouldShow && !existing) {
+          let dot = document.createElement("span");
+          dot.className = "unread-dot";
+          row.appendChild(dot);
+        } else if (!shouldShow && existing) {
+          existing.remove();
+        }
       });
     }
 
@@ -1014,12 +1036,13 @@
           <div class="card" style="display:flex; flex-direction:column; gap:8px;">
             <div style="font-size:12px; font-weight:700; color:var(--muted); margin-bottom:4px;">RECENT MESSAGES</div>
             ${friends.map(f => `
-              <div class="row" data-open="${esc(f.username)}" style="cursor:pointer; ${current && current.username === f.username ? 'background:var(--surface-hover); border:1px solid var(--border-accent);' : ''}">
+              <div class="row" data-open="${esc(f.username)}" style="cursor:pointer; position:relative; ${current && current.username === f.username ? 'background:var(--surface-hover); border:1px solid var(--border-accent);' : ''}">
                 <div class="avatar" id="ch-av-${esc(f.username)}"></div>
                 <div>
                   <b style="font-size:14px;">${esc(f.displayName)}</b>
                   <small style="display:block; color:var(--muted); font-size:11px;">@${esc(f.username)}</small>
                 </div>
+                ${unread.has(f.username) ? '<span class="unread-dot"></span>' : ''}
               </div>
             `).join("") || `
               <div class="empty-state" style="padding:32px 12px;">
@@ -1048,13 +1071,36 @@
       if (current && (window.innerWidth > 768 || openCurrent)) loadChat(current.username);
     }
 
-    async function loadChat(username) {
+    function renderMessageList(messages) {
+      let list = $("#messageList");
+      if (!list) return;
+      list.innerHTML = messages.map(m => `
+        <div class="bubble ${m.sender === me.username ? "me" : ""}">
+          ${esc(m.body)}
+          <small>${pigeonIcons[m.pigeon_id] || "🕊️"} · ${new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
+        </div>
+      `).join("");
+      list.scrollTop = list.scrollHeight;
+    }
+
+    async function loadChat(username, opts = {}) {
       current = friends.find(f => f.username === username) || current;
       if (!current) return;
-      
-      document.body.classList.add("mobile-chat-active");
-      
+
+      unread.delete(username);
+      repaintUnread();
+
       let d = await api("/api/messages/" + encodeURIComponent(username));
+
+      // Lightweight path: just refresh the message list, leave the header
+      // and composer (and whatever the user is mid-typing) untouched.
+      if (opts.refreshOnly && $("#messageList")) {
+        renderMessageList(d.messages);
+        return;
+      }
+
+      document.body.classList.add("mobile-chat-active");
+
       $("#chat").innerHTML = `
         <div class="chat-header">
           <button class="btn ghost" id="backToChats" style="display:none; padding:6px 10px;">←</button>
@@ -1066,23 +1112,14 @@
             </small>
           </div>
         </div>
-        <div class="messages" id="messageList">
-          ${d.messages.map(m => `
-            <div class="bubble ${m.sender === me.username ? "me" : ""}">
-              ${esc(m.body)}
-              <small>${pigeonIcons[m.pigeon_id] || "🕊️"} · ${new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
-            </div>
-          `).join("")}
-        </div>
+        <div class="messages" id="messageList"></div>
         <div class="composer">
           <input id="msg" class="input" placeholder="Write a message via ${pigeons[pigeon]}…">
           <button class="btn" id="send">Send ${pigeonIcons[pigeon]}</button>
         </div>`;
 
+      renderMessageList(d.messages);
       renderAvatar($("#activeChatAvatar"), current);
-
-      let msgList = $("#messageList");
-      msgList.scrollTop = msgList.scrollHeight;
 
       if (window.innerWidth <= 768) {
         let backBtn = $("#backToChats");
@@ -1112,9 +1149,10 @@
         });
         $("#msg").value = "";
         showFlight(current);
-        await loadChat(current.username);
+        await loadChat(current.username, { refreshOnly: true });
       } catch (e) {
         toast(e.message);
+      } finally {
         btn.disabled = false;
         btn.textContent = original;
       }
@@ -1140,11 +1178,23 @@
       }, 2500);
     }
 
+    async function computeSentCount() {
+      let total = 0;
+      await Promise.all(friends.map(async f => {
+        try {
+          let d = await api("/api/messages/" + encodeURIComponent(f.username));
+          total += (d.messages || []).filter(m => m.sender === me.username).length;
+        } catch (e) { /* skip a conversation that fails to load */ }
+      }));
+      return total;
+    }
+
     // MY CASTLE / PROFILE VIEW
     async function profile() {
       if (!me) $("#page").innerHTML = skeletonRows(1);
       let d = await api("/api/me");
       me = d.user;
+      await refreshFriends();
       
       $("#page").innerHTML = `
         <div class="card" style="max-width:650px; margin:0 auto;">
@@ -1163,12 +1213,8 @@
                 <div class="metric-lbl">Friends</div>
               </div>
               <div class="metric">
-                <div class="metric-val">🕊️ 247</div>
+                <div class="metric-val" id="metricSent">🕊️ …</div>
                 <div class="metric-lbl">Pigeons Sent</div>
-              </div>
-              <div class="metric">
-                <div class="metric-val">📍 842</div>
-                <div class="metric-lbl">km Travelled</div>
               </div>
             </div>
           </div>
@@ -1213,6 +1259,11 @@
 
       renderAvatar($("#castleAvatar"), me);
       $("#vis").value = me.locationVisibility || "approximate";
+
+      computeSentCount().then(count => {
+        let el = $("#metricSent");
+        if (el) el.textContent = "🕊️ " + count;
+      });
 
       // Event Listeners for Castle Settings
       $("#editAvatarBtn").onclick = () => {
